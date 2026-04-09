@@ -1,0 +1,13 @@
+{
+  "name": "mexipay",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/backend",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "backend": "yarn workspace @mexipay/backend dev",
+    "mobile": "yarn workspace @mexipay/mobile start"
+  }
+}
