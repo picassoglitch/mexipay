@@ -36,7 +36,12 @@ export class Merchant extends Model<
   declare id: CreationOptional<string>;
   declare businessName: string;
   declare email: string;
-  declare passwordHash: string;
+  /** Null for OAuth-only accounts */
+  declare passwordHash: CreationOptional<string | null>;
+  /** 'local' | 'google' | 'apple' */
+  declare authProvider: CreationOptional<string>;
+  /** Subject/sub from the OAuth provider — null for local accounts */
+  declare oauthProviderId: CreationOptional<string | null>;
   declare isActive: CreationOptional<boolean>;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
@@ -60,7 +65,15 @@ Merchant.init(
     },
     passwordHash: {
       type: DataTypes.STRING(72),
-      allowNull: false,
+      allowNull: true,
+    },
+    authProvider: {
+      type: DataTypes.STRING(16),
+      defaultValue: 'local',
+    },
+    oauthProviderId: {
+      type: DataTypes.STRING(256),
+      allowNull: true,
     },
     isActive: {
       type: DataTypes.BOOLEAN,

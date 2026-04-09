@@ -84,11 +84,32 @@ export interface Merchant {
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
+  isNew?: boolean;
   merchant: Merchant;
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
   const { data } = await api.post<LoginResponse>('/auth/login', { email, password });
+  await saveTokens(data.accessToken, data.refreshToken);
+  return data;
+}
+
+export async function loginWithGoogle(idToken: string): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>('/auth/google', { idToken });
+  await saveTokens(data.accessToken, data.refreshToken);
+  return data;
+}
+
+export async function loginWithApple(params: {
+  identityToken: string;
+  email?: string;
+  fullName?: { givenName?: string | null; familyName?: string | null } | null;
+}): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>('/auth/apple', {
+    identityToken: params.identityToken,
+    email: params.email,
+    fullName: params.fullName ?? undefined,
+  });
   await saveTokens(data.accessToken, data.refreshToken);
   return data;
 }

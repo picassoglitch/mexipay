@@ -12,9 +12,11 @@
       "backgroundColor": "#1A56DB"
     },
     "assetBundlePatterns": ["**/*"],
+    "scheme": "mexipay",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "mx.mexipay.app"
+      "bundleIdentifier": "mx.mexipay.app",
+      "usesAppleSignIn": true
     },
     "android": {
       "adaptiveIcon": {
@@ -22,6 +24,9 @@
         "backgroundColor": "#1A56DB"
       },
       "package": "mx.mexipay.app"
-    }
+    },
+    "plugins": [
+      "expo-apple-authentication"
+    ]
   }
 }
