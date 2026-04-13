@@ -1,200 +1,197 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
+  View, Text, TouchableOpacity, StyleSheet,
+  StatusBar, Animated, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation';
+import type { RootStackParamList } from '../navigation/AppNavigator';
+import { C, FONTS } from '../utils/colors';
+import { formatMXN, formatDateTime } from '../utils/format';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Success'>;
 
-function formatMXN(centavos: number): string {
-  return `$${(centavos / 100).toFixed(2)}`;
-}
-
 export default function SuccessScreen({ navigation, route }: Props) {
-  const { transaction } = route.params;
+  const { amountCentavos, feeCentavos, netCentavos, feePercent, reference, paidAt } =
+    route.params;
 
-  const amountMXN = formatMXN(transaction.amountCentavos);
-  const feeMXN = formatMXN(transaction.feeCentavos);
-  const netMXN = formatMXN(transaction.netCentavos);
+  // ── Entrance animation ────────────────────────────────────────────────────
+  const scale   = useRef(new Animated.Value(0.4)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(40)).current;
 
-  const paidAt = transaction.paidAt
-    ? new Date(transaction.paidAt).toLocaleString('es-MX', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      })
-    : new Date().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale,   { toValue: 1, useNativeDriver: true, tension: 60, friction: 7 }),
+      Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(slideUp, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const displayDate = paidAt ? formatDateTime(paidAt) : formatDateTime(new Date().toISOString());
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Success icon */}
-        <View style={styles.iconCircle}>
-          <Text style={styles.iconText}>✓</Text>
-        </View>
+    <SafeAreaView style={s.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        <Text style={styles.title}>¡Pago recibido!</Text>
-        <Text style={styles.subtitle}>Transferencia SPEI confirmada</Text>
-
-        {/* Main amount */}
-        <Text style={styles.amount}>{amountMXN} MXN</Text>
-
-        {/* Fee breakdown card */}
-        <View style={styles.breakdownCard}>
-          <Text style={styles.breakdownTitle}>Desglose del cobro</Text>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Total cobrado</Text>
-            <Text style={styles.rowValue}>{amountMXN}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <View>
-              <Text style={styles.rowLabel}>Comisión MexiPay</Text>
-              <Text style={styles.rowSubLabel}>{transaction.feePercent ?? '1.80%'} (mín. $6.00)</Text>
+        {/* ── Check animation ── */}
+        <Animated.View style={[s.checkWrap, { transform: [{ scale }], opacity }]}>
+          <View style={s.checkRing}>
+            <View style={s.checkCircle}>
+              <Text style={s.checkMark}>✓</Text>
             </View>
-            <Text style={[styles.rowValue, styles.feeValue]}>- {feeMXN}</Text>
           </View>
+        </Animated.View>
 
-          <View style={styles.divider} />
+        {/* ── Title ── */}
+        <Animated.View style={{ opacity, transform: [{ translateY: slideUp }] }}>
+          <Text style={s.title}>¡Pago recibido!</Text>
+          <Text style={s.subtitle}>Transferencia SPEI confirmada</Text>
+        </Animated.View>
 
-          <View style={styles.row}>
-            <Text style={[styles.rowLabel, styles.netLabel]}>Neto para ti</Text>
-            <Text style={[styles.rowValue, styles.netValue]}>{netMXN}</Text>
-          </View>
-        </View>
+        {/* ── Amount ── */}
+        <Animated.View style={[s.amountArea, { opacity, transform: [{ translateY: slideUp }] }]}>
+          <Text style={s.amount}>{formatMXN(amountCentavos)}</Text>
+          <Text style={s.amountLabel}>MXN</Text>
+        </Animated.View>
 
-        {/* Details */}
-        <View style={styles.detailsCard}>
-          <Row label="Referencia" value={transaction.reference} />
-          <Row label="ID transacción" value={transaction.id.slice(0, 8).toUpperCase()} />
-          <Row label="Hora de pago" value={paidAt} />
-        </View>
+        {/* ── Fee breakdown card ── */}
+        <Animated.View style={[s.card, { opacity, transform: [{ translateY: slideUp }] }]}>
+          <Text style={s.cardTitle}>Desglose del cobro</Text>
 
-        {/* Actions */}
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => navigation.replace('Keypad')}
-        >
-          <Text style={styles.primaryButtonText}>Nuevo cobro</Text>
-        </TouchableOpacity>
+          <Row
+            label="Total cobrado"
+            value={formatMXN(amountCentavos)}
+            valueColor={C.text}
+          />
+          <View style={s.divider} />
+          <Row
+            label={`Comisión MexiPay (${feePercent})`}
+            sublabel="Mín. $6.00 · 1.80%"
+            value={`- ${formatMXN(feeCentavos)}`}
+            valueColor={C.failed}
+          />
+          <View style={s.divider} />
+          <Row
+            label="Neto para ti"
+            value={formatMXN(netCentavos)}
+            valueColor={C.accent}
+            large
+          />
+        </Animated.View>
 
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.replace('Dashboard')}
-        >
-          <Text style={styles.secondaryButtonText}>Ver transacciones</Text>
-        </TouchableOpacity>
+        {/* ── Details card ── */}
+        <Animated.View style={[s.card, { opacity, transform: [{ translateY: slideUp }] }]}>
+          <DetailRow label="Referencia SPEI" value={reference} />
+          <DetailRow label="Hora de pago"    value={displayDate} />
+        </Animated.View>
+
+        {/* ── Actions ── */}
+        <Animated.View style={[s.actions, { opacity }]}>
+          <TouchableOpacity
+            style={s.primaryBtn}
+            onPress={() => navigation.replace('Keypad')}
+          >
+            <Text style={s.primaryBtnText}>Nuevo cobro</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.secondaryBtn}
+            onPress={() => navigation.replace('Dashboard')}
+          >
+            <Text style={s.secondaryBtnText}>Ver transacciones</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function Row({
+  label, sublabel, value, valueColor, large,
+}: {
+  label: string; sublabel?: string; value: string;
+  valueColor: string; large?: boolean;
+}) {
   return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
+    <View style={r.row}>
+      <View style={r.rowLeft}>
+        <Text style={[r.label, large && r.labelLarge]}>{label}</Text>
+        {sublabel && <Text style={r.sublabel}>{sublabel}</Text>}
+      </View>
+      <Text style={[r.value, { color: valueColor }, large && r.valueLarge]}>{value}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#F0FDF4' },
-  scroll: { padding: 24, alignItems: 'center' },
-  iconCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#16A34A',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#16A34A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 8,
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={r.detailRow}>
+      <Text style={r.detailLabel}>{label}</Text>
+      <Text style={r.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
+const r = StyleSheet.create({
+  row:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 12 },
+  rowLeft:    { flex: 1 },
+  label:      { fontFamily: FONTS.medium, fontSize: 14, color: C.text },
+  labelLarge: { fontFamily: FONTS.bold,   fontSize: 16 },
+  sublabel:   { fontFamily: FONTS.body,   fontSize: 11, color: C.textSub, marginTop: 2 },
+  value:      { fontFamily: FONTS.bold,   fontSize: 14 },
+  valueLarge: { fontSize: 20 },
+  detailRow:  { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.border },
+  detailLabel:{ fontFamily: FONTS.body,   fontSize: 13, color: C.textSub },
+  detailValue:{ fontFamily: FONTS.medium, fontSize: 13, color: C.text },
+});
+
+// ── Main styles ─────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  safe:   { flex: 1, backgroundColor: C.bg },
+  scroll: { flexGrow: 1, paddingHorizontal: 24, paddingBottom: 32, alignItems: 'center' },
+
+  checkWrap: { marginTop: 32, marginBottom: 28 },
+  checkRing: {
+    width: 112, height: 112, borderRadius: 56,
+    backgroundColor: C.accentBg, justifyContent: 'center', alignItems: 'center',
   },
-  iconText: { fontSize: 44, color: '#fff', fontWeight: '800', lineHeight: 52 },
-  title: { fontSize: 26, fontWeight: '800', color: '#14532D', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#16A34A', marginBottom: 20 },
-  amount: {
-    fontSize: 52,
-    fontWeight: '800',
-    color: '#111827',
-    letterSpacing: -2,
-    marginBottom: 28,
+  checkCircle: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.55, shadowRadius: 20, elevation: 12,
   },
-  breakdownCard: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 4,
+  checkMark: { fontFamily: FONTS.heading, fontSize: 40, color: C.bg, lineHeight: 48 },
+
+  title:    { fontFamily: FONTS.heading, fontSize: 30, color: C.text, textAlign: 'center', letterSpacing: -0.5 },
+  subtitle: { fontFamily: FONTS.body,   fontSize: 14, color: C.textSub, textAlign: 'center', marginTop: 6, marginBottom: 8 },
+
+  amountArea: { alignItems: 'center', marginVertical: 20 },
+  amount:     { fontFamily: FONTS.heading, fontSize: 60, color: C.accent, letterSpacing: -2 },
+  amountLabel:{ fontFamily: FONTS.medium,  fontSize: 14, color: C.textSub, marginTop: -4 },
+
+  card:      {
+    width: '100%', backgroundColor: C.surface, borderRadius: 20,
+    borderWidth: 1, borderColor: C.border, padding: 20, marginBottom: 12,
   },
-  breakdownTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#6B7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 16,
+  cardTitle: { fontFamily: FONTS.medium, fontSize: 11, color: C.textSub, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 },
+  divider:   { height: 1, backgroundColor: C.border },
+
+  actions:       { width: '100%', marginTop: 8, gap: 10 },
+  primaryBtn:    {
+    backgroundColor: C.accent, borderRadius: 16, paddingVertical: 18, alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 16, elevation: 8,
   },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 },
-  rowLabel: { fontSize: 15, color: '#374151', fontWeight: '500' },
-  rowSubLabel: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
-  rowValue: { fontSize: 15, color: '#111827', fontWeight: '600' },
-  feeValue: { color: '#DC2626' },
-  netLabel: { fontWeight: '700', fontSize: 16 },
-  netValue: { fontWeight: '800', fontSize: 18, color: '#16A34A' },
-  divider: { height: 1, backgroundColor: '#F3F4F6' },
-  detailsCard: {
-    width: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
+  primaryBtnText:  { fontFamily: FONTS.bold, fontSize: 17, color: C.bg },
+  secondaryBtn:    {
+    borderRadius: 16, paddingVertical: 16, alignItems: 'center',
+    borderWidth: 1, borderColor: C.border2,
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F9FAFB',
-  },
-  detailLabel: { fontSize: 13, color: '#6B7280' },
-  detailValue: { fontSize: 13, fontWeight: '600', color: '#111827' },
-  primaryButton: {
-    width: '100%',
-    backgroundColor: '#1A56DB',
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  secondaryButton: {
-    width: '100%',
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  secondaryButtonText: { color: '#1A56DB', fontSize: 15, fontWeight: '600' },
+  secondaryBtnText: { fontFamily: FONTS.medium, fontSize: 16, color: C.text },
 });

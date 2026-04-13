@@ -1,386 +1,317 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  ScrollView,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, KeyboardAvoidingView, Platform,
+  Alert, ScrollView, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../navigation';
+import type { RootStackParamList } from '../navigation/AppNavigator';
 import { login, loginWithGoogle, loginWithApple } from '../services/api';
+import { useAuthStore } from '../store/authStore';
+import { C, FONTS } from '../utils/colors';
 
-// Required for expo-auth-session redirect to complete on Android/web
 WebBrowser.maybeCompleteAuthSession();
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
-const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB;
-const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS;
-const GOOGLE_ANDROID_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID;
+const GOOGLE_WEB = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB;
+const GOOGLE_IOS = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS;
+const GOOGLE_AND = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_ANDROID;
 
 export default function LoginScreen({ navigation }: Props) {
-  const [email, setEmail] = useState('');
+  const setAuth = useAuthStore((s) => s.setAuth);
+
+  const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<'google' | 'apple' | null>(null);
-  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [loading,  setLoading]  = useState(false);
+  const [socialBusy, setSocialBusy] = useState<'google' | 'apple' | null>(null);
+  const [showEmail, setShowEmail] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // Google Sign-In (expo-auth-session)
-  // ---------------------------------------------------------------------------
-
-  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
-    webClientId: GOOGLE_WEB_CLIENT_ID,
-    iosClientId: GOOGLE_IOS_CLIENT_ID,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
+  // ── Google ────────────────────────────────────────────────────────────────
+  const [, googleResponse, promptGoogle] = Google.useAuthRequest({
+    webClientId:     GOOGLE_WEB,
+    iosClientId:     GOOGLE_IOS,
+    androidClientId: GOOGLE_AND,
   });
 
   useEffect(() => {
     if (googleResponse?.type !== 'success') return;
-
     const idToken = googleResponse.params?.id_token;
-    if (!idToken) {
-      Alert.alert('Error', 'No se recibió token de Google');
-      setSocialLoading(null);
-      return;
-    }
+    if (!idToken) { setSocialBusy(null); return; }
 
     loginWithGoogle(idToken)
-      .then(() => navigation.replace('Dashboard'))
-      .catch((err: unknown) => {
-        const message =
-          (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-          'Error al iniciar sesión con Google';
-        Alert.alert('Error', message);
+      .then((r) => { setAuth(r.merchant, r.accessToken, r.refreshToken); })
+      .catch((e: unknown) => {
+        Alert.alert('Error', apiMsg(e) ?? 'Error al iniciar con Google');
       })
-      .finally(() => setSocialLoading(null));
-  }, [googleResponse, navigation]);
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
+      .finally(() => setSocialBusy(null));
+  }, [googleResponse]);
 
   async function handleGoogle() {
-    setSocialLoading('google');
-    try {
-      await promptGoogleAsync();
-      // Outcome handled in the useEffect above
-    } catch {
-      setSocialLoading(null);
-      Alert.alert('Error', 'No se pudo abrir Google Sign-In');
-    }
+    setSocialBusy('google');
+    try { await promptGoogle(); }
+    catch { setSocialBusy(null); }
   }
 
+  // ── Apple ────────────────────────────────────────────────────────────────
   async function handleApple() {
-    setSocialLoading('apple');
+    setSocialBusy('apple');
     try {
-      const credential = await AppleAuthentication.signInAsync({
+      const c = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
-
-      await loginWithApple({
-        identityToken: credential.identityToken!,
-        email: credential.email ?? undefined,
-        fullName: credential.fullName,
+      const r = await loginWithApple({
+        identityToken: c.identityToken!,
+        email:    c.email ?? undefined,
+        fullName: c.fullName,
       });
-
-      navigation.replace('Dashboard');
-    } catch (err: unknown) {
-      const code = (err as { code?: string }).code;
-      if (code === 'ERR_REQUEST_CANCELED') {
-        // User dismissed — no error alert needed
-        return;
-      }
-      const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Error al iniciar sesión con Apple';
-      Alert.alert('Error', message);
+      setAuth(r.merchant, r.accessToken, r.refreshToken);
+    } catch (e: unknown) {
+      if ((e as { code?: string }).code === 'ERR_REQUEST_CANCELED') return;
+      Alert.alert('Error', apiMsg(e) ?? 'Error al iniciar con Apple');
     } finally {
-      setSocialLoading(null);
+      setSocialBusy(null);
     }
   }
 
+  // ── Email/password ────────────────────────────────────────────────────────
   async function handleEmailLogin() {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Por favor ingresa tu correo y contraseña');
+      Alert.alert('Campos requeridos', 'Por favor ingresa tu correo y contraseña');
       return;
     }
     setLoading(true);
     try {
-      await login(email.trim().toLowerCase(), password);
-      navigation.replace('Dashboard');
-    } catch (err: unknown) {
-      const message =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        'Error al iniciar sesión';
-      Alert.alert('Error', message);
+      const r = await login(email.trim().toLowerCase(), password);
+      setAuth(r.merchant, r.accessToken, r.refreshToken);
+    } catch (e: unknown) {
+      Alert.alert('Error', apiMsg(e) ?? 'Credenciales incorrectas');
     } finally {
       setLoading(false);
     }
   }
 
-  const anyLoading = loading || socialLoading !== null;
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const busy = loading || socialBusy !== null;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={s.safe}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={s.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.logo}>MexiPay</Text>
-            <Text style={styles.tagline}>Cobra con SPEI al instante</Text>
+          {/* ── Logo ── */}
+          <View style={s.logoArea}>
+            <View style={s.logoMark}>
+              <Text style={s.logoMarkText}>M</Text>
+            </View>
+            <Text style={s.logoText}>MexiPay</Text>
+            <Text style={s.tagline}>Tu terminal de cobro SPEI</Text>
           </View>
 
-          {/* Social sign-in card */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Accede a tu cuenta</Text>
+          {/* ── Card ── */}
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Accede a tu cuenta</Text>
 
             {/* Google */}
-            <TouchableOpacity
-              style={[styles.socialBtn, styles.googleBtn, anyLoading && styles.btnDisabled]}
+            <SocialBtn
+              label="Continuar con Google"
+              icon="G"
+              iconColor="#4285F4"
+              bg={C.surface2}
+              textColor={C.text}
+              busy={socialBusy === 'google'}
+              disabled={busy}
               onPress={handleGoogle}
-              disabled={anyLoading || !googleRequest}
-              activeOpacity={0.8}
-            >
-              {socialLoading === 'google' ? (
-                <ActivityIndicator color="#374151" size="small" />
-              ) : (
-                <>
-                  <GoogleIcon />
-                  <Text style={styles.googleBtnText}>Continuar con Google</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            />
 
-            {/* Apple — iOS only */}
+            {/* Apple – iOS only */}
             {Platform.OS === 'ios' && (
-              <TouchableOpacity
-                style={[styles.socialBtn, styles.appleBtn, anyLoading && styles.btnDisabled]}
+              <SocialBtn
+                label="Continuar con Apple"
+                icon=""
+                iconColor={C.text}
+                bg="#1A1A1A"
+                textColor={C.text}
+                busy={socialBusy === 'apple'}
+                disabled={busy}
                 onPress={handleApple}
-                disabled={anyLoading}
-                activeOpacity={0.8}
-              >
-                {socialLoading === 'apple' ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <AppleIcon />
-                    <Text style={styles.appleBtnText}>Continuar con Apple</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+              />
             )}
 
             {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>o usa tu correo</Text>
-              <View style={styles.dividerLine} />
+            <View style={s.divider}>
+              <View style={s.divLine} />
+              <Text style={s.divText}>o con correo</Text>
+              <View style={s.divLine} />
             </View>
 
             {/* Toggle email form */}
-            {!showEmailForm ? (
+            {!showEmail ? (
               <TouchableOpacity
-                style={[styles.emailToggleBtn, anyLoading && styles.btnDisabled]}
-                onPress={() => setShowEmailForm(true)}
-                disabled={anyLoading}
+                style={[s.emailToggle, busy && s.dimmed]}
+                disabled={busy}
+                onPress={() => setShowEmail(true)}
               >
-                <Text style={styles.emailToggleText}>Iniciar sesión con correo</Text>
+                <Text style={s.emailToggleText}>Iniciar sesión con correo</Text>
               </TouchableOpacity>
             ) : (
               <>
-                <Text style={styles.label}>Correo electrónico</Text>
+                <Text style={s.label}>Correo electrónico</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   value={email}
                   onChangeText={setEmail}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   autoComplete="email"
                   placeholder="negocio@ejemplo.mx"
-                  placeholderTextColor="#9CA3AF"
-                  editable={!anyLoading}
+                  placeholderTextColor={C.textDim}
+                  selectionColor={C.accent}
+                  editable={!busy}
                 />
 
-                <Text style={styles.label}>Contraseña</Text>
+                <Text style={s.label}>Contraseña</Text>
                 <TextInput
-                  style={styles.input}
+                  style={s.input}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry
                   autoComplete="password"
                   placeholder="••••••••"
-                  placeholderTextColor="#9CA3AF"
-                  editable={!anyLoading}
+                  placeholderTextColor={C.textDim}
+                  selectionColor={C.accent}
+                  editable={!busy}
                 />
 
                 <TouchableOpacity
-                  style={[styles.emailLoginBtn, anyLoading && styles.btnDisabled]}
+                  style={[s.loginBtn, busy && s.dimmed]}
                   onPress={handleEmailLogin}
-                  disabled={anyLoading}
+                  disabled={busy}
                 >
-                  {loading ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.emailLoginBtnText}>Iniciar Sesión</Text>
-                  )}
+                  {loading
+                    ? <ActivityIndicator color={C.bg} />
+                    : <Text style={s.loginBtnText}>Iniciar sesión</Text>}
                 </TouchableOpacity>
               </>
             )}
           </View>
 
-          <Text style={styles.terms}>
-            Al continuar aceptas nuestros{' '}
-            <Text style={styles.termsLink}>Términos de Servicio</Text> y{' '}
-            <Text style={styles.termsLink}>Política de Privacidad</Text>
+          <Text style={s.terms}>
+            Al continuar aceptas los{' '}
+            <Text style={s.termsLink}>Términos de servicio</Text>
+            {' '}y la{' '}
+            <Text style={s.termsLink}>Política de privacidad</Text>
           </Text>
-
-          <Text style={styles.footer}>¿Ayuda? soporte@mexipay.mx</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Inline SVG-style icons (no extra assets needed)
-// ---------------------------------------------------------------------------
+// ── Social button helper ────────────────────────────────────────────────────
 
-function GoogleIcon() {
+function SocialBtn({
+  label, icon, iconColor, bg, textColor, busy, disabled, onPress,
+}: {
+  label: string; icon: string; iconColor: string;
+  bg: string; textColor: string;
+  busy: boolean; disabled: boolean; onPress: () => void;
+}) {
   return (
-    <View style={styles.iconBox}>
-      <Text style={styles.googleIconText}>G</Text>
-    </View>
+    <TouchableOpacity
+      style={[s.socialBtn, { backgroundColor: bg }, disabled && s.dimmed]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.75}
+    >
+      {busy ? (
+        <ActivityIndicator color={textColor} size="small" />
+      ) : (
+        <>
+          <Text style={[s.socialIcon, { color: iconColor }]}>{icon}</Text>
+          <Text style={[s.socialLabel, { color: textColor }]}>{label}</Text>
+        </>
+      )}
+    </TouchableOpacity>
   );
 }
 
-function AppleIcon() {
-  return (
-    <View style={styles.iconBox}>
-      <Text style={styles.appleIconText}></Text>
-    </View>
-  );
+function apiMsg(e: unknown): string | undefined {
+  return (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
 }
 
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
+// ── Styles ──────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#1A56DB' },
-  flex: { flex: 1 },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32 },
-  header: { alignItems: 'center', marginBottom: 36 },
-  logo: { fontSize: 42, fontWeight: '800', color: '#fff', letterSpacing: -1 },
-  tagline: { fontSize: 15, color: '#BFDBFE', marginTop: 6 },
+const s = StyleSheet.create({
+  safe:   { flex: 1, backgroundColor: C.bg },
+  flex:   { flex: 1 },
+  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40 },
 
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
-    marginBottom: 20,
+  // Logo
+  logoArea:     { alignItems: 'center', marginBottom: 40 },
+  logoMark:     {
+    width: 64, height: 64, borderRadius: 20,
+    backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center', marginBottom: 16,
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.45, shadowRadius: 20, elevation: 12,
   },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
+  logoMarkText: { fontFamily: FONTS.heading, fontSize: 32, color: C.bg },
+  logoText:     { fontFamily: FONTS.heading, fontSize: 36, color: C.text, letterSpacing: -1 },
+  tagline:      { fontFamily: FONTS.body,    fontSize: 14, color: C.textSub, marginTop: 6 },
 
-  // Social buttons
-  socialBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    paddingVertical: 13,
-    marginBottom: 12,
-    gap: 10,
+  // Card
+  card:      {
+    backgroundColor: C.surface, borderRadius: 20, padding: 24,
+    borderWidth: 1, borderColor: C.border,
+    marginBottom: 24,
   },
-  googleBtn: {
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  appleBtn: {
-    backgroundColor: '#000',
-  },
-  btnDisabled: { opacity: 0.5 },
-  googleBtnText: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  appleBtnText: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  cardTitle: { fontFamily: FONTS.subheading, fontSize: 18, color: C.text, textAlign: 'center', marginBottom: 24 },
 
-  iconBox: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
-  googleIconText: { fontSize: 16, fontWeight: '900', color: '#4285F4' },
-  appleIconText: { fontSize: 18, color: '#fff' },
+  // Social
+  socialBtn:   {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderRadius: 12, paddingVertical: 14, marginBottom: 10,
+    borderWidth: 1, borderColor: C.border2, gap: 10,
+  },
+  socialIcon:  { fontFamily: FONTS.bold, fontSize: 17, width: 22, textAlign: 'center' },
+  socialLabel: { fontFamily: FONTS.medium, fontSize: 15 },
 
   // Divider
-  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, gap: 10 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
-  dividerText: { fontSize: 12, color: '#9CA3AF', fontWeight: '500' },
+  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 18, gap: 10 },
+  divLine: { flex: 1, height: 1, backgroundColor: C.border },
+  divText: { fontFamily: FONTS.body, fontSize: 12, color: C.textSub },
 
   // Email toggle
-  emailToggleBtn: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: 'center',
+  emailToggle:     {
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center',
+    borderWidth: 1, borderColor: C.border2,
   },
-  emailToggleText: { fontSize: 15, fontWeight: '600', color: '#374151' },
+  emailToggleText: { fontFamily: FONTS.medium, fontSize: 15, color: C.text },
 
   // Email form
-  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  label: { fontFamily: FONTS.medium, fontSize: 13, color: C.textSub, marginBottom: 8 },
   input: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#111827',
-    marginBottom: 14,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border2,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 13,
+    fontSize: 15, color: C.text, marginBottom: 14,
+    fontFamily: FONTS.body,
   },
-  emailLoginBtn: {
-    backgroundColor: '#1A56DB',
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  emailLoginBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  loginBtn:     { backgroundColor: C.accent, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 4 },
+  loginBtnText: { fontFamily: FONTS.bold, fontSize: 16, color: C.bg },
 
-  terms: { textAlign: 'center', fontSize: 11, color: '#BFDBFE', lineHeight: 16, paddingHorizontal: 8 },
-  termsLink: { color: '#fff', fontWeight: '600' },
-  footer: { textAlign: 'center', color: '#BFDBFE', fontSize: 11, marginTop: 12 },
+  dimmed: { opacity: 0.45 },
+  terms:  { fontFamily: FONTS.body, fontSize: 11, color: C.textSub, textAlign: 'center', lineHeight: 17 },
+  termsLink: { color: C.accent },
 });
